@@ -104,6 +104,48 @@ def parse_time(s: str) -> Optional[str]:
     mm = int(m.group(2))
     return f"{hh:02d}:{mm:02d}"
 
+
+def _parse_schedule_list(year: int, month: int, soup, home_keywords: List[str]) -> List[Game]:
+    games: List[Game] = []
+    items = soup.select("div.tmpl_schedule_list ul.schedule-ul > li")
+    for item in items:
+        day_el = item.select_one("p.day")
+        opp_el = item.select_one("td.team-name p")
+        venue_el = item.select_one("p.stadium-name")
+        if not (day_el and opp_el and venue_el):
+            continue
+
+        date_text = _clean_text(day_el.get_text(" ", strip=True))
+        m = re.search(r"(\d{1,2})[./](\d{1,2})", date_text)
+        if not m:
+            continue
+        mo = int(m.group(1))
+        day = int(m.group(2))
+        if mo != month:
+            continue
+        date = datetime(year, mo, day)
+
+        venue = _clean_text(venue_el.get_text(" ", strip=True))
+        opponent = _clean_text(opp_el.get_text(" ", strip=True))
+
+        time_el = item.select_one("p.start-time")
+        time_raw = _clean_text(time_el.get_text(" ", strip=True)) if time_el else ""
+        start_time = parse_time(time_raw)
+
+        home_el = item.select_one("p.a-h")
+        home_tag = _clean_text(home_el.get_text(" ", strip=True)).upper() if home_el else ""
+        home_away = "[HOME]" if "HOME" in home_tag else "[AWAY]"
+        if not home_tag and any(keyword in venue for keyword in home_keywords):
+            home_away = "[HOME]"
+
+        games.append(Game(home_away, opponent, venue, date, start_time))
+
+    keyed = {}
+    for g in games:
+        key = (g.date.strftime("%Y-%m-%d"), g.opponent, g.venue)
+        keyed[key] = g
+    return list(keyed.values())
+
 def parse_alvark_month(year: int, month: int, html: str) -> List[Game]:
     """
     Parser for https://www.alvark-tokyo.jp/schedule/?scheduleYear=YYYY&scheduleMonth=M
@@ -114,6 +156,10 @@ def parse_alvark_month(year: int, month: int, html: str) -> List[Game]:
     if BeautifulSoup is None:
         raise RuntimeError("BeautifulSoup is required. pip install beautifulsoup4")
     soup = BeautifulSoup(html, "html.parser")
+
+    games = _parse_schedule_list(year, month, soup, home_keywords=["TOYOTA ARENA TOKYO"])
+    if games:
+        return games
 
     # heuristic: each game box has opponent and venue; search by common text markers
     cards = []
@@ -210,6 +256,14 @@ def parse_sunrockers_month(year: int, month: int, html: str) -> List[Game]:
     if BeautifulSoup is None:
         raise RuntimeError("BeautifulSoup is required. pip install beautifulsoup4")
     soup = BeautifulSoup(html, "html.parser")
+    games = _parse_schedule_list(
+        year,
+        month,
+        soup,
+        home_keywords=["青山学院記念館", "ひがしんアリーナ"],
+    )
+    if games:
+        return games
     candidates = soup.select(".p-schedule__item, .schedule__item, li, article, div")
     games: List[Game] = []
     for el in candidates:
