@@ -17,10 +17,12 @@ Usage examples:
 import argparse
 import csv
 import dataclasses
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Iterable, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import requests
@@ -28,6 +30,41 @@ try:
 except Exception:
     requests = None
     BeautifulSoup = None
+
+CONFIG_PATH = Path(__file__).resolve().parent / "data" / "team_data.json"
+
+
+def _load_config(path: Path) -> Dict[str, object]:
+    if not path.exists():
+        raise FileNotFoundError(f"Team data file not found: {path}")
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+TEAM_CONFIG: Dict[str, Any] = _load_config(CONFIG_PATH)
+TEAM_DATA: Dict[str, Any] = TEAM_CONFIG.get("teams", {})
+ARENA_DATA: Dict[str, Any] = TEAM_CONFIG.get("arenas", {})
+ARENA_NAMES = list(ARENA_DATA.keys())
+
+
+def _team_home_keywords(team: str) -> List[str]:
+    info = TEAM_DATA.get(team)
+    if not isinstance(info, dict):
+        return []
+    home = info.get("home_arenas", [])
+    if isinstance(home, list):
+        return [str(h) for h in home]
+    return []
+
+
+def _team_schedule_url(team: str, year: int, month: int) -> str:
+    info = TEAM_DATA.get(team)
+    if not isinstance(info, dict):
+        raise ValueError(f"Unknown team: {team}")
+    template = info.get("schedule_url")
+    if not isinstance(template, str):
+        raise ValueError(f"Team '{team}' has no schedule_url")
+    return template.format(year=year, month=month)
 
 GOOGLE_HEADERS = [
     "Subject",
@@ -105,7 +142,7 @@ def parse_time(s: str) -> Optional[str]:
     return f"{hh:02d}:{mm:02d}"
 
 
-def _parse_schedule_list(year: int, month: int, soup, home_keywords: List[str]) -> List[Game]:
+def _parse_schedule_list(team: str, year: int, month: int, soup, home_keywords: List[str]) -> List[Game]:
     games: List[Game] = []
     items = soup.select("div.tmpl_schedule_list ul.schedule-ul > li")
     for item in items:
@@ -137,6 +174,11 @@ def _parse_schedule_list(year: int, month: int, soup, home_keywords: List[str]) 
         home_away = "[HOME]" if "HOME" in home_tag else "[AWAY]"
         if not home_tag and any(keyword in venue for keyword in home_keywords):
             home_away = "[HOME]"
+        if not home_tag:
+            arena = ARENA_DATA.get(venue, {})
+            home_teams = arena.get("home_teams", []) if isinstance(arena, dict) else []
+            if isinstance(home_teams, list) and team in home_teams:
+                home_away = "[HOME]"
 
         games.append(Game(home_away, opponent, venue, date, start_time))
 
@@ -157,7 +199,7 @@ def parse_alvark_month(year: int, month: int, html: str) -> List[Game]:
         raise RuntimeError("BeautifulSoup is required. pip install beautifulsoup4")
     soup = BeautifulSoup(html, "html.parser")
 
-    games = _parse_schedule_list(year, month, soup, home_keywords=["TOYOTA ARENA TOKYO"])
+    games = _parse_schedule_list("alvark", year, month, soup, home_keywords=_team_home_keywords("alvark"))
     if games:
         return games
 
@@ -218,8 +260,7 @@ def parse_alvark_month(year: int, month: int, html: str) -> List[Game]:
                 venue = v_m.group(2).strip(" 、，,)|）)]")
         if not venue:
             # last resort: look for known arenas
-            known_arenas = ["TOYOTA ARENA TOKYO", "おおきにアリーナ舞洲", "CNAアリーナ", "ゼビオアリーナ", "IGアリーナ"]
-            for a in known_arenas:
+            for a in ARENA_NAMES:
                 if a in text:
                     venue = a
                     break
@@ -231,7 +272,7 @@ def parse_alvark_month(year: int, month: int, html: str) -> List[Game]:
 
         # Home/Away: page often describes it; fallback by venue containing home arena
         home_away = "[AWAY]"
-        if any(x in venue for x in ["TOYOTA ARENA TOKYO"]):
+        if any(x in venue for x in _team_home_keywords("alvark")):
             home_away = "[HOME]"
         # Some pages mark HOME/AWAY textually
         if "HOME" in text.upper():
@@ -257,10 +298,11 @@ def parse_sunrockers_month(year: int, month: int, html: str) -> List[Game]:
         raise RuntimeError("BeautifulSoup is required. pip install beautifulsoup4")
     soup = BeautifulSoup(html, "html.parser")
     games = _parse_schedule_list(
+        "sunrockers",
         year,
         month,
         soup,
-        home_keywords=["青山学院記念館", "ひがしんアリーナ"],
+        home_keywords=_team_home_keywords("sunrockers"),
     )
     if games:
         return games
@@ -310,8 +352,7 @@ def parse_sunrockers_month(year: int, month: int, html: str) -> List[Game]:
             if v_m:
                 venue = v_m.group(2).strip(" 、，,)|）)]")
         if not venue:
-            known_arenas = ["青山学院記念館", "ひがしんアリーナ", "国立代々木競技場 第二体育館", "横浜BUNTAI", "IGアリーナ"]
-            for a in known_arenas:
+            for a in ARENA_NAMES:
                 if a in text:
                     venue = a
                     break
@@ -323,7 +364,7 @@ def parse_sunrockers_month(year: int, month: int, html: str) -> List[Game]:
 
         # Home/Away (home arenas contain 青山学院記念館 / ひがしんアリーナ)
         home_away = "[AWAY]"
-        if any(x in venue for x in ["青山学院記念館", "ひがしんアリーナ"]):
+        if any(x in venue for x in _team_home_keywords("sunrockers")):
             home_away = "[HOME]"
         if "HOME" in text.upper():
             home_away = "[HOME]"
@@ -341,12 +382,7 @@ def parse_sunrockers_month(year: int, month: int, html: str) -> List[Game]:
 def fetch_month(team: str, y: int, m: int) -> str:
     if requests is None:
         raise RuntimeError("requests is required. pip install requests")
-    if team == "alvark":
-        url = f"https://www.alvark-tokyo.jp/schedule/?scheduleYear={y}&scheduleMonth={m}"
-    elif team == "sunrockers":
-        url = f"https://www.sunrockers.jp/schedule/?scheduleYear={y}&scheduleMonth={m}"
-    else:
-        raise ValueError("Unknown team")
+    url = _team_schedule_url(team, y, m)
     resp = requests.get(url, timeout=20)
     resp.raise_for_status()
     return resp.text
@@ -355,12 +391,15 @@ def scrape(team: str, start_ym: str, end_ym: str) -> List[Game]:
     start = datetime.strptime(start_ym, "%Y-%m")
     end = datetime.strptime(end_ym, "%Y-%m")
     all_games: List[Game] = []
+    parser = {
+        "alvark": parse_alvark_month,
+        "sunrockers": parse_sunrockers_month,
+    }.get(team)
+    if parser is None:
+        raise ValueError(f"Unknown team: {team}")
     for y, m in month_iter(start, end):
         html = fetch_month(team, y, m)
-        if team == "alvark":
-            games = parse_alvark_month(y, m, html)
-        else:
-            games = parse_sunrockers_month(y, m, html)
+        games = parser(y, m, html)
         all_games.extend(games)
     # Sort
     all_games.sort(key=lambda g: (g.date, g.start_time or "23:59", g.venue))

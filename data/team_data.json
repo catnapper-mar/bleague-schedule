@@ -1,0 +1,52 @@
+{
+  "teams": {
+    "alvark": {
+      "name": "アルバルク東京",
+      "schedule_url": "https://www.alvark-tokyo.jp/schedule/?scheduleYear={year}&scheduleMonth={month}",
+      "home_arenas": ["TOYOTA ARENA TOKYO"]
+    },
+    "sunrockers": {
+      "name": "サンロッカーズ渋谷",
+      "schedule_url": "https://www.sunrockers.jp/schedule/?scheduleYear={year}&scheduleMonth={month}",
+      "home_arenas": ["青山学院記念館", "ひがしんアリーナ"]
+    }
+  },
+  "arenas": {
+    "TOYOTA ARENA TOKYO": {
+      "home_teams": ["alvark"]
+    },
+    "青山学院記念館": {
+      "home_teams": ["sunrockers"]
+    },
+    "ひがしんアリーナ": {
+      "home_teams": ["sunrockers"]
+    },
+    "沖縄サントリーアリーナ": {
+      "home_teams": ["ryukyu-golden-kings"]
+    },
+    "おおきにアリーナ舞洲": {
+      "home_teams": ["osaka-evessa"]
+    },
+    "CNAアリーナ☆あきた": {
+      "home_teams": ["akita-northern-happinets"]
+    },
+    "CNAアリーナ": {
+      "home_teams": ["akita-northern-happinets"]
+    },
+    "豊橋市総合体育館": {
+      "home_teams": ["san-en-neo-phoenix"]
+    },
+    "国立代々木競技場 第二体育館": {
+      "home_teams": ["sunrockers"]
+    },
+    "横浜BUNTAI": {
+      "home_teams": ["yokohama-b-corsairs"]
+    },
+    "IGアリーナ": {
+      "home_teams": ["altiri-chiba"]
+    },
+    "ゼビオアリーナ": {
+      "home_teams": ["sendai-89ers"]
+    }
+  }
+}
